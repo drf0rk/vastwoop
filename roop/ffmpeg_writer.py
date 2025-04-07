@@ -1,138 +1,147 @@
+# Replace the content of /vastwoop/roop/ffmpeg_writer.py with this code
+
 import os
-import tempfile
 import subprocess
 import numpy as np
+import tempfile
 from pathlib import Path
 
-# Improved FFMPEG writer with better error handling for Gradio environments
-class ImprovedFFmpegWriter:
-    def __init__(self, filename, fps=30, quality=8, output_params=None):
+class FFmpegWriter:
+    """
+    Improved FFmpegWriter with better error handling and path management for Gradio environments
+    """
+    def __init__(self, filename, fps=30, codec='libx264', pixfmt='rgb24', output_params=None):
         """
-        Initialize FFMPEG writer with improved path handling for Gradio
+        Initialize FFmpeg writer with robust path handling
         """
-        # Ensure we have an absolute path and the directory exists
+        # Ensure absolute path and create directory if needed
         self.filename = os.path.abspath(filename)
         os.makedirs(os.path.dirname(self.filename), exist_ok=True)
         
         self.fps = fps
-        self.quality = quality
+        self.codec = codec
+        self.pixfmt = pixfmt
         self.output_params = output_params or []
         self.proc = None
         self.dimensions = None
         
-        # Temporary file for debugging
-        self.log_file = tempfile.NamedTemporaryFile(delete=False, suffix='.log')
-        print(f"FFMPEG log file: {self.log_file.name}")
+        # Create a log file for debugging
+        self.log_file = open(os.path.join(tempfile.gettempdir(), 'ffmpeg_roop.log'), 'a')
+        self.log_file.write(f"\n\n--- New FFmpeg session for {self.filename} ---\n")
+        self.log_file.flush()
         
     def _start_ffmpeg_process(self, frame_size):
-        """Start the FFMPEG subprocess with proper error handling"""
+        """Start the FFmpeg process with reliable parameters"""
         self.dimensions = frame_size
+        height, width = frame_size[0], frame_size[1]
         
-        # Build command with explicit parameters
+        # Build FFmpeg command with explicit parameters
         command = [
             'ffmpeg',
-            '-y',  # Overwrite output file if it exists
+            '-y',  # Overwrite output file
             '-f', 'rawvideo',
             '-vcodec', 'rawvideo',
-            '-s', f'{frame_size[1]}x{frame_size[0]}',  # Width x height
-            '-pix_fmt', 'rgb24',
+            '-s', f'{width}x{height}',
+            '-pix_fmt', self.pixfmt,
             '-r', f'{self.fps}',
             '-i', '-',  # Input from pipe
-            '-vcodec', 'libx264',
-            '-preset', 'medium',
-            '-crf', f'{self.quality}',
+            '-vcodec', self.codec,
         ]
         
-        # Add any additional output parameters
+        # Add custom output parameters
         command.extend(self.output_params)
         
         # Add output filename
         command.append(self.filename)
         
-        print(f"Starting FFMPEG with command: {' '.join(command)}")
+        self.log_file.write(f"FFmpeg command: {' '.join(command)}\n")
+        self.log_file.flush()
         
         try:
-            # Start process with pipe for stdin and capture stderr for logging
+            # Start process with larger buffer
             self.proc = subprocess.Popen(
                 command,
                 stdin=subprocess.PIPE,
-                stderr=self.log_file,
-                bufsize=10**8  # Larger buffer
+                stderr=subprocess.PIPE,
+                bufsize=10**8
             )
+            
+            self.log_file.write("FFmpeg process started successfully\n")
+            self.log_file.flush()
+            
         except Exception as e:
-            print(f"Failed to start FFMPEG process: {e}")
-            raise
+            self.log_file.write(f"Failed to start FFmpeg: {str(e)}\n")
+            self.log_file.flush()
+            raise IOError(f"Error starting FFmpeg process: {str(e)}")
     
     def write_frame(self, frame):
-        """Write a frame to the video file with improved error handling"""
-        # Initialize on first frame
+        """Write a frame with error handling and recovery"""
         if self.proc is None:
             self._start_ffmpeg_process(frame.shape)
         
-        # Check if dimensions match
-        if frame.shape[:2] != self.dimensions:
-            raise ValueError(f"Frame size ({frame.shape[1]}x{frame.shape[0]}) doesn't match writer dimensions ({self.dimensions[1]}x{self.dimensions[0]})")
-        
-        # Ensure frame is correctly formatted
+        # Ensure frame is in the correct format
         if frame.dtype != np.uint8:
-            frame = frame.astype(np.uint8)
+            frame = np.clip(frame, 0, 255).astype(np.uint8)
         
-        # Try to write with retry logic
         try:
+            # Write frame to FFmpeg
             self.proc.stdin.write(frame.tobytes())
-            self.proc.stdin.flush()  # Force the buffer to be written
+            self.proc.stdin.flush()  # Force buffer flush
+            
         except BrokenPipeError:
-            print("Broken pipe encountered, restarting FFMPEG process...")
-            # Close and restart
-            if self.proc:
-                self._close()
+            self.log_file.write("BrokenPipeError encountered, attempting to restart FFmpeg\n")
+            self.log_file.flush()
+            
+            # Clean up old process
+            self._close_proc()
+            
+            # Restart with same dimensions
             self._start_ffmpeg_process(frame.shape)
+            
             try:
-                # Try again with the new process
+                # Try writing the frame again
                 self.proc.stdin.write(frame.tobytes())
                 self.proc.stdin.flush()
+                self.log_file.write("Successfully wrote frame after restarting FFmpeg\n")
+                self.log_file.flush()
+                
             except Exception as e:
-                print(f"Failed to write frame after restart: {e}")
-                # Log current state
-                self._debug_log()
-                raise
+                self.log_file.write(f"Failed to write frame after restart: {str(e)}\n")
+                self.log_file.flush()
+                error = f"FFMPEG encountered the following error while writing file: {str(e)}"
+                raise IOError(error)
+                
+        except Exception as e:
+            self.log_file.write(f"Error writing frame: {str(e)}\n")
+            self.log_file.flush()
+            error = f"FFMPEG encountered the following error while writing file: {str(e)}"
+            raise IOError(error)
     
-    def _debug_log(self):
-        """Print debug information to help diagnose issues"""
-        print("=== DEBUG INFORMATION ===")
-        print(f"Output path: {self.filename}")
-        print(f"Directory exists: {os.path.exists(os.path.dirname(self.filename))}")
-        print(f"Directory writable: {os.access(os.path.dirname(self.filename), os.W_OK)}")
-        print(f"Current working directory: {os.getcwd()}")
-        print("========================")
-    
-    def _close(self):
-        """Safely close the FFMPEG process"""
+    def _close_proc(self):
+        """Safely close the FFmpeg process"""
         if self.proc:
             try:
                 self.proc.stdin.close()
             except:
                 pass
-            
+                
             try:
                 # Wait for process to finish
                 self.proc.wait(timeout=5)
             except subprocess.TimeoutExpired:
-                print("FFMPEG process didn't terminate, killing it")
+                self.log_file.write("FFmpeg process didn't terminate, killing it\n")
+                self.log_file.flush()
                 self.proc.kill()
-            
+                
             self.proc = None
     
     def close(self):
-        """Close the writer properly"""
-        self._close()
-        print(f"FFMPEG process finished. Check log at {self.log_file.name}")
-        
-    def __enter__(self):
-        return self
-        
-    def __exit__(self, exc_type, exc_val, exc_tb):
-        self.close()
+        """Close the writer and finalize the video file"""
+        self._close_proc()
+        self.log_file.write(f"FFmpeg writer closed for {self.filename}\n")
+        self.log_file.flush()
+        self.log_file.close()
         
     def __del__(self):
+        """Destructor to ensure resources are released"""
         self.close()
