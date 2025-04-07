@@ -255,23 +255,52 @@ class ProcessMgr():
                 progress()
 
 
-    def write_frames_thread(self):
-        nextindex = 0
-        num_producers = self.num_threads
-        
-        while True:
-            process, frame = self.processed_queue[nextindex % self.num_threads].get()
-            nextindex += 1
-            if frame is not None:
-                if self.output_to_file:
-                    self.videowriter.write_frame(frame)
-                if self.output_to_cam:
-                    self.streamwriter.WriteToStream(frame)
-                del frame
-            elif process == False:
-                num_producers -= 1
-                if num_producers < 1:
-                    return
+# Locate the write_frames_thread method in /vastwoop/roop/ProcessMgr.py
+# and replace it with this improved version
+
+def write_frames_thread(self):
+    """Thread to write processed frames to video file with better error handling"""
+    try:
+        while not self.stop_event.is_set():
+            try:
+                # Get frame from queue with timeout
+                frame = self.frame_queue.get(timeout=1.0)
+                
+                # None indicates we're done
+                if frame is None:
+                    break
+                    
+                # Write frame with retry logic
+                max_retries = 3
+                retries = 0
+                
+                while retries < max_retries:
+                    try:
+                        self.videowriter.write_frame(frame)
+                        break  # Success, exit retry loop
+                    except IOError as e:
+                        retries += 1
+                        if retries >= max_retries:
+                            raise  # Re-raise after max retries
+                        
+                        print(f"Retrying frame write after error (attempt {retries}/{max_retries})")
+                        # Brief pause before retry
+                        import time
+                        time.sleep(0.5)
+                
+                # Mark as done
+                self.frame_queue.task_done()
+                
+            except queue.Empty:
+                # Just a timeout, continue
+                continue
+                
+    except Exception as e:
+        import traceback
+        print(f"Error in write_frames_thread: {str(e)}")
+        print(traceback.format_exc())
+        self.error = str(e)
+        self.stop_event.set()  # Signal to stop
             
 
 
