@@ -317,22 +317,60 @@ def mkdir_with_umask(directory):
     os.umask(oldmask)
 
 
-def open_folder(path: str):
-    platform = get_platform()
+# Replace the open_folder function in /vastwoop/roop/utilities.py
+# with this improved version that handles various environments
+
+def open_folder(path):
+    """
+    Open the folder at the specified path using the appropriate method for the current platform,
+    with fallbacks for headless/container environments.
+    """
+    import os
+    import subprocess
+    import platform
+    import sys
+    
+    # Make sure the path exists
+    path = os.path.abspath(path)
+    if not os.path.exists(path):
+        os.makedirs(path, exist_ok=True)
+    
     try:
-        if platform == "darwin":
-            subprocess.call(("open", path))
-        elif platform in ["win64", "win32"]:
-            open_with_default_app(path)
-        elif platform == "wsl":
-            subprocess.call("cmd.exe /C start".split() + [path])
-        else:  # linux variants
-            subprocess.Popen(["xdg-open", path])
+        # Determine the right opener based on platform
+        if platform.system() == 'Windows':
+            # Windows
+            os.startfile(path)
+        elif platform.system() == 'Darwin':
+            # macOS
+            subprocess.run(['open', path], check=False)
+        else:
+            # Linux/Unix
+            # Try multiple commands in order of preference
+            commands = [
+                ['xdg-open', path],
+                ['gnome-open', path],
+                ['kde-open', path],
+                ['gio', 'open', path],
+                ['nautilus', path]
+            ]
+            
+            success = False
+            for cmd in commands:
+                try:
+                    subprocess.run(cmd, check=True)
+                    success = True
+                    break
+                except (subprocess.SubprocessError, FileNotFoundError):
+                    continue
+            
+            if not success:
+                # If all GUI methods fail, print path for user
+                print(f"Could not open folder. Path: {path}")
+                
     except Exception as e:
-        traceback.print_exc()
-        pass
-        # import webbrowser
-        # webbrowser.open(url)
+        # Don't let folder opening errors crash the program
+        print(f"Could not open folder: {str(e)}")
+        print(f"Folder path: {path}")
 
 
 def create_version_html() -> str:
