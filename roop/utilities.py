@@ -41,6 +41,43 @@ if platform.system().lower() == "darwin":
     ssl._create_default_https_context = ssl._create_unverified_context
 
 
+# You can add this code at the beginning of your script to disable folder opening
+
+# Patch the open_folder function to do nothing in headless environments
+import sys
+import os
+
+def is_headless_environment():
+    """Detect if we're in a headless/container environment"""
+    # Check for common environment variables
+    if 'COLAB_GPU' in os.environ or 'KAGGLE_KERNEL_RUN_TYPE' in os.environ:
+        return True
+        
+    # Check for display
+    if 'DISPLAY' not in os.environ and os.name != 'nt':
+        return True
+        
+    return False
+
+if is_headless_environment():
+    # Import and patch only if necessary
+    try:
+        # Try to import the module
+        sys.path.append('/vastwoop/roop')
+        import utilities
+        
+        # Replace with no-op function
+        def noop_open_folder(path):
+            print(f"Would open folder (disabled in headless environment): {path}")
+            
+        # Patch the function
+        utilities.open_folder = noop_open_folder
+        print("Disabled automatic folder opening for headless environment")
+    except ImportError:
+        # Module not found, not a critical error
+        pass
+
+
 # https://github.com/facefusion/facefusion/blob/master/facefusion
 def detect_fps(target_path: str) -> float:
     fps = 24.0
