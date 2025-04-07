@@ -365,7 +365,6 @@ def open_folder(path):
     import os
     import subprocess
     import platform
-    import sys
     
     # Make sure the path exists
     path = os.path.abspath(path)
@@ -381,32 +380,30 @@ def open_folder(path):
             # macOS
             subprocess.run(['open', path], check=False)
         else:
-            # Linux/Unix
-            # Try multiple commands in order of preference
+            # Linux/Unix - try multiple commands
             commands = [
                 ['xdg-open', path],
                 ['gnome-open', path],
                 ['kde-open', path],
-                ['gio', 'open', path],
-                ['nautilus', path]
+                ['gio', 'open', path]
             ]
             
             success = False
             for cmd in commands:
                 try:
-                    subprocess.run(cmd, check=True)
+                    subprocess.Popen(cmd)
                     success = True
                     break
                 except (subprocess.SubprocessError, FileNotFoundError):
                     continue
             
             if not success:
-                # If all GUI methods fail, print path for user
-                print(f"Could not open folder. Path: {path}")
+                # If all methods fail, just print the path
+                print(f"Could not open folder automatically. Path: {path}")
                 
     except Exception as e:
         # Don't let folder opening errors crash the program
-        print(f"Could not open folder: {str(e)}")
+        print(f"Note: Could not open folder: {str(e)}")
         print(f"Folder path: {path}")
 
 
