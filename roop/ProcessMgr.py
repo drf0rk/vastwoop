@@ -332,7 +332,7 @@ def write_frames_thread(self):
         self.frames_queue = []
         self.processed_queue = []
         for _ in range(threads):
-            self.frames_queue.append(Queue(1))
+            self.frames_queue.append(Queue(10))
             self.processed_queue.append(Queue(10))
 
         self.output_to_file = output_method != "Virtual Camera"
