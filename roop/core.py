@@ -254,15 +254,23 @@ def batch_process_with_options(files:list[ProcessEntry], options, progress):
 
 
 
-def batch_process(output_method, files:list[ProcessEntry], use_new_method) -> None:
-    global clip_text, process_mgr
-
-    roop.globals.processing = True
-
-    # limit threads for some providers
-    max_threads = suggest_execution_threads()
-    if max_threads == 1:
-        roop.globals.execution_threads = 1
+def suggest_execution_threads() -> int:
+    """Suggest number of execution threads based on system configuration."""
+    cpu_count = os.cpu_count() or 8
+    suggested_threads = max(1, cpu_count - 2)  # Leave 2 cores for system and UI
+    
+    # Check available memory - with 24GB, we can use more threads
+    try:
+        import psutil
+        total_memory_gb = psutil.virtual_memory().total / (1024**3)
+        # Heuristic: allocate 1 thread per 1.5GB of RAM available (adjust as needed)
+        memory_based_threads = int(total_memory_gb / 1.5)
+        suggested_threads = min(suggested_threads, memory_based_threads)
+    except ImportError:
+        pass  # If psutil isn't available, stick with CPU-based suggestion
+    
+    # Hard cap at 32 threads (or whatever your UI allows)
+    return min(32, suggested_threads)
 
     imagefiles:list[ProcessEntry] = []
     videofiles:list[ProcessEntry] = []
