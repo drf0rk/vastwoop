@@ -192,26 +192,61 @@ class ProcessMgr():
                     future.result()
 
 
-    def process_frames(self, source_files: List[str], target_files: List[str], current_files, update: Callable[[], None]) -> None:
-        for f in current_files:
-            if not roop.globals.processing:
-                return
+def process_videoframes(self, threadindex, progress) -> None:
+    while True:
+        frame = self.frames_queue[threadindex].get()
+        if frame is None:
+            self.processing_threads -= 1
             
-            # Decode the byte array into an OpenCV image
-            temp_frame = cv2.imdecode(np.fromfile(f, dtype=np.uint8), cv2.IMREAD_COLOR)
-            if temp_frame is not None:
-                if self.options.frame_processing:
-                    for p in self.processors:
-                        frame = p.Run(temp_frame)
-                    resimg = frame
-                else:
-                    resimg = self.process_frame(temp_frame)
-                if resimg is not None:
-                    i = source_files.index(f)
-                    # Also let numpy write the file to support utf-8/16 filenames
-                    cv2.imencode(f'.{roop.globals.CFG.output_image_format}',resimg)[1].tofile(target_files[i])
-            if update:
-                update()
+            # Add retry logic for the None signal
+            try:
+                self.processed_queue[threadindex].put((False, None), block=True, timeout=1.0)
+            except queue.Full:
+                retries = 0
+                max_retries = 5
+                while retries < max_retries:
+                    print(f"Warning: Processed queue full in thread {threadindex}. Retrying ({retries+1}/{max_retries})...")
+                    time.sleep(0.2)  # Slightly longer wait between retries
+                    try:
+                        # Try again with a longer timeout
+                        self.processed_queue[threadindex].put((False, None), block=True, timeout=2.0)
+                        break  # Success, exit retry loop
+                    except queue.Full:
+                        retries += 1
+                
+                if retries >= max_retries:
+                    print(f"ERROR: Could not queue end signal after {max_retries} attempts in thread {threadindex}.")
+            
+            return
+        else:
+            if self.options.frame_processing:
+                for p in self.processors:
+                    frame = p.Run(frame)
+                resimg = frame
+            else:                            
+                resimg = self.process_frame(frame)
+            
+            # Add retry logic for processed frames
+            try:
+                self.processed_queue[threadindex].put((True, resimg), block=True, timeout=1.0)
+            except queue.Full:
+                retries = 0
+                max_retries = 5
+                while retries < max_retries:
+                    print(f"Warning: Processed queue full in thread {threadindex}. Retrying ({retries+1}/{max_retries})...")
+                    time.sleep(0.2)  # Slightly longer wait between retries
+                    try:
+                        # Try again with a longer timeout
+                        self.processed_queue[threadindex].put((True, resimg), block=True, timeout=2.0)
+                        break  # Success, exit retry loop
+                    except queue.Full:
+                        retries += 1
+                
+                if retries >= max_retries:
+                    print(f"ERROR: Could not queue frame after {max_retries} attempts in thread {threadindex}. Frame may be dropped.")
+            
+            del frame
+            progress()
 
 
 
